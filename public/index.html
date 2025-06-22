@@ -87,7 +87,7 @@
   </div>
 
   <script>
-    const ws = new WebSocket('ws://192.168.1.10:3000');
+    const ws = new WebSocket('ws://' + location.host);
     let myName = '';
     const statusDiv = document.getElementById('status');
     const messagesUl = document.getElementById('messages');
