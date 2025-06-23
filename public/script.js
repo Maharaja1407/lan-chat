@@ -2,14 +2,41 @@ let mediaRecorder;
 let audioChunks = [];
 let ws;
 let currentUser = '';
+let typingTimeout;
+
+// Initialize floating particles
+function createParticles() {
+    const particlesContainer = document.getElementById('particles');
+    const binaryChars = ['0', '1', '01', '10', '001', '110', '101', '011'];
+    
+    setInterval(() => {
+        if (particlesContainer.children.length < 20) {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            particle.textContent = binaryChars[Math.floor(Math.random() * binaryChars.length)];
+            particle.style.left = Math.random() * 100 + '%';
+            particle.style.animationDuration = (Math.random() * 10 + 10) + 's';
+            particle.style.opacity = Math.random() * 0.5 + 0.2;
+            particlesContainer.appendChild(particle);
+            
+            // Remove particle after animation
+            setTimeout(() => {
+                if (particle.parentNode) {
+                    particle.parentNode.removeChild(particle);
+                }
+            }, 20000);
+        }
+    }, 1000);
+}
 
 function connect() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}`);
 
     ws.onopen = function() {
-        document.getElementById('status').textContent = 'Connected';
-        document.getElementById('status').style.color = '#28a745';
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = 'Connected to Grid';
+        statusEl.className = 'status connected';
     };
 
     ws.onmessage = function(event) {
@@ -18,13 +45,17 @@ function connect() {
         switch (data.type) {
             case 'welcome':
                 currentUser = data.name;
-                document.getElementById('status').textContent = `Connected as ${currentUser}`;
+                document.getElementById('status').textContent = `Node: ${currentUser}`;
                 break;
             case 'users':
                 updateUserList(data.users);
                 break;
             case 'chat':
-                addChatMessage(data.name, data.message, data.name === currentUser);
+                showTypingIndicator();
+                setTimeout(() => {
+                    hideTypingIndicator();
+                    addChatMessage(data.name, data.message, data.name === currentUser);
+                }, 1000);
                 break;
             case 'voice':
                 addVoiceMessage(data.name, data.audioData, data.name === currentUser);
@@ -45,16 +76,30 @@ function connect() {
     };
 
     ws.onclose = function() {
-        document.getElementById('status').textContent = 'Disconnected';
-        document.getElementById('status').style.color = '#dc3545';
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = 'Connection Lost';
+        statusEl.className = 'status disconnected';
         setTimeout(connect, 3000);
     };
 
     ws.onerror = function(error) {
         console.error('WebSocket error:', error);
-        document.getElementById('status').textContent = 'Connection Error';
-        document.getElementById('status').style.color = '#dc3545';
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = 'Grid Error';
+        statusEl.className = 'status disconnected';
     };
+}
+
+function showTypingIndicator() {
+    const indicator = document.getElementById('typingIndicator');
+    indicator.classList.add('active');
+    const messagesDiv = document.getElementById('messages');
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function hideTypingIndicator() {
+    const indicator = document.getElementById('typingIndicator');
+    indicator.classList.remove('active');
 }
 
 function updateUserList(users) {
@@ -63,10 +108,10 @@ function updateUserList(users) {
     users.forEach(user => {
         const userDiv = document.createElement('div');
         userDiv.className = 'user-item';
-        userDiv.textContent = user;
         if (user === currentUser) {
-            userDiv.style.background = 'rgba(255, 255, 255, 0.2)';
+            userDiv.classList.add('current-user');
         }
+        userDiv.innerHTML = `<span>${user}</span>`;
         userList.appendChild(userDiv);
     });
 }
@@ -77,7 +122,7 @@ function addChatMessage(name, message, isOwn = false) {
     messageDiv.className = `message ${isOwn ? 'own' : 'other'}`;
     const time = new Date().toLocaleTimeString();
     messageDiv.innerHTML = `
-        <div class="message-header">${name} - ${time}</div>
+        <div class="message-header">${name} • ${time}</div>
         <div class="message-content">${escapeHtml(message)}</div>
     `;
     messagesDiv.appendChild(messageDiv);
@@ -90,8 +135,8 @@ function addVoiceMessage(name, audioData, isOwn = false) {
     messageDiv.className = `message ${isOwn ? 'own' : 'other'}`;
     const time = new Date().toLocaleTimeString();
     messageDiv.innerHTML = `
-        <div class="message-header">${name} - ${time}</div>
-        <audio controls src="${audioData}" style="width: 100%;"></audio>
+        <div class="message-header">${name} • ${time}</div>
+        <audio controls src="${audioData}" style="width: 100%; filter: hue-rotate(180deg);"></audio>
     `;
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -102,11 +147,17 @@ function addPollMessage(data) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message other';
     const time = new Date().toLocaleTimeString();
-    let pollHtml = `<div class="message-header">${data.name} - ${time}</div>
-        <div class="message-content"><b>${escapeHtml(data.question)}</b></div>
-        <div>`;
+    let pollHtml = `<div class="message-header">${data.name} • ${time}</div>
+        <div class="message-content"><strong>${escapeHtml(data.question)}</strong></div>
+        <div style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px;">`;
     data.options.forEach((opt, idx) => {
-        pollHtml += `<button onclick="votePoll('${data.id}', ${idx})">${escapeHtml(opt)} (<span id="poll-${data.id}-${idx}">0</span>)</button> `;
+        pollHtml += `<button onclick="votePoll('${data.id}', ${idx})" 
+            style="background: var(--glass-bg); border: 1px solid var(--glass-border); 
+            color: var(--text-primary); padding: 8px 16px; border-radius: 20px; 
+            cursor: pointer; transition: all 0.3s ease; font-family: inherit;"
+            onmouseover="this.style.background='rgba(0,212,255,0.2)'; this.style.borderColor='var(--neon-blue)'"
+            onmouseout="this.style.background='var(--glass-bg)'; this.style.borderColor='var(--glass-border)'"
+            >${escapeHtml(opt)} (<span id="poll-${data.id}-${idx}">0</span>)</button>`;
     });
     pollHtml += `</div>`;
     messageDiv.innerHTML = pollHtml;
@@ -132,15 +183,15 @@ function updatePollVotes(data) {
 function showError(message) {
     const messagesDiv = document.getElementById('messages');
     const errorDiv = document.createElement('div');
-    errorDiv.className = 'upload-progress';
-    errorDiv.style.background = '#f8d7da';
-    errorDiv.style.borderColor = '#f5c6cb';
-    errorDiv.textContent = `Error: ${message}`;
+    errorDiv.className = 'error-message';
+    errorDiv.textContent = `System Error: ${message}`;
     messagesDiv.appendChild(errorDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
     setTimeout(() => {
-        errorDiv.remove();
+        if (errorDiv.parentNode) {
+            errorDiv.remove();
+        }
     }, 5000);
 }
 
@@ -150,12 +201,13 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Voice button event
+// Voice recording functionality
 document.getElementById('voiceBtn').addEventListener('click', function() {
     if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
         this.textContent = "🎤";
         this.title = "Record Voice";
+        this.style.background = "linear-gradient(45deg, #ffc107, #fd7e14)";
     } else {
         navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
             mediaRecorder = new MediaRecorder(stream);
@@ -169,20 +221,22 @@ document.getElementById('voiceBtn').addEventListener('click', function() {
                 reader.onload = function(evt) {
                     ws.send(JSON.stringify({
                         type: 'voice',
-                        audioData: evt.target.result // base64
+                        audioData: evt.target.result
                     }));
                 };
                 reader.readAsDataURL(audioBlob);
             };
             mediaRecorder.start();
-            document.getElementById('voiceBtn').textContent = "⏹️";
-            document.getElementById('voiceBtn').title = "Stop Recording";
+            this.textContent = "⏹️";
+            this.title = "Stop Recording";
+            this.style.background = "linear-gradient(45deg, #dc3545, #fd7e14)";
         }).catch(err => {
             showError("Microphone access denied.");
         });
     }
 });
 
+// Poll creation
 document.getElementById('pollBtn').addEventListener('click', function() {
     const question = prompt("Enter poll question:");
     if (!question) return;
@@ -202,20 +256,19 @@ function addFileMessage(data) {
     const time = new Date().toLocaleTimeString();
     let previewHtml = '';
 
-    // Preview if mimeType is image/* or filename ends with image extension
     const isImage = (data.mimeType && data.mimeType.startsWith('image/')) ||
         /\.(png|jpe?g|gif|svg|avif|webp)$/i.test(data.filename);
 
     if (isImage) {
         previewHtml = `
             <div class="file-preview">
-                <img src="${data.fileUrl}" alt="${data.filename}" style="max-width: 200px; max-height: 200px;" onclick="window.open('${data.fileUrl}', '_blank')">
+                <img src="${data.fileUrl}" alt="${data.filename}" onclick="window.open('${data.fileUrl}', '_blank')">
             </div>
         `;
     }
 
     messageDiv.innerHTML = `
-        <div class="message-header">${data.name} - ${time}</div>
+        <div class="message-header">${data.name} • ${time}</div>
         <div class="file-message">
             <div class="file-info">
                 <span class="file-icon">📎</span>
@@ -236,7 +289,6 @@ function addFileMessage(data) {
 function sendFile(file) {
     if (!file || ws.readyState !== WebSocket.OPEN) return;
 
-    // Check file size (limit to 10MB)
     if (file.size > 10 * 1024 * 1024) {
         showError('File size must be less than 10MB');
         return;
@@ -244,7 +296,7 @@ function sendFile(file) {
 
     const reader = new FileReader();
     reader.onload = function(e) {
-        const fileData = e.target.result.split(',')[1]; // Remove data URL prefix
+        const fileData = e.target.result.split(',')[1];
 
         ws.send(JSON.stringify({
             type: 'file',
@@ -257,7 +309,7 @@ function sendFile(file) {
     reader.readAsDataURL(file);
 }
 
-// Add event listeners for file input and button
+// File upload events
 document.getElementById('fileBtn').addEventListener('click', function() {
     document.getElementById('fileInput').click();
 });
@@ -267,22 +319,24 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
     files.forEach(file => {
         sendFile(file);
     });
-    e.target.value = ''; // Reset input
+    e.target.value = '';
 });
 
 // Drag and drop support
 const chatContainer = document.querySelector('.chat-container');
 chatContainer.addEventListener('dragover', function(e) {
     e.preventDefault();
-    chatContainer.style.border = '3px dashed #007bff';
+    chatContainer.style.boxShadow = '0 0 50px rgba(0, 212, 255, 0.5), inset 0 0 50px rgba(0, 212, 255, 0.1)';
 });
+
 chatContainer.addEventListener('dragleave', function(e) {
     e.preventDefault();
-    chatContainer.style.border = 'none';
+    chatContainer.style.boxShadow = '0 0 50px rgba(0, 212, 255, 0.2), inset 0 0 50px rgba(0, 212, 255, 0.05)';
 });
+
 chatContainer.addEventListener('drop', function(e) {
     e.preventDefault();
-    chatContainer.style.border = 'none';
+    chatContainer.style.boxShadow = '0 0 50px rgba(0, 212, 255, 0.2), inset 0 0 50px rgba(0, 212, 255, 0.05)';
     const files = Array.from(e.dataTransfer.files);
     files.forEach(file => {
         sendFile(file);
@@ -301,6 +355,7 @@ function sendMessage() {
     }
 }
 
+// Input events
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
 
 document.getElementById('messageInput').addEventListener('keypress', function(e) {
@@ -309,5 +364,17 @@ document.getElementById('messageInput').addEventListener('keypress', function(e)
     }
 });
 
-// Connect on page load
-connect();
+// Add input glow effect
+document.getElementById('messageInput').addEventListener('focus', function() {
+    this.parentElement.style.background = 'rgba(0, 212, 255, 0.05)';
+});
+
+document.getElementById('messageInput').addEventListener('blur', function() {
+    this.parentElement.style.background = 'rgba(0, 0, 0, 0.8)';
+});
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    createParticles();
+    connect();
+});
